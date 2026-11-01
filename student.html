@@ -1,0 +1,180 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PlickEd - Trả Lời Online</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between font-sans p-4">
+
+  <!-- Header: Select Student & Status -->
+  <div class="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-md">
+    <div class="flex justify-between items-center mb-3">
+      <h1 class="text-xl font-black text-blue-400">PlickEd Student</h1>
+      <span id="session-status" class="px-3 py-1 rounded-full text-xs font-bold uppercase bg-yellow-500 text-black">Chờ phát đề</span>
+    </div>
+
+    <div>
+      <label class="block text-xs text-slate-400 mb-1">Chọn tên của bạn:</label>
+      <select id="select-student" onchange="onStudentSelect()" class="w-full bg-slate-900 border border-slate-600 rounded-xl p-2.5 text-white font-bold focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">-- Đang tải danh sách lớp --</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Main Question Content -->
+  <main class="my-auto py-6 space-y-6">
+    <!-- Question Text -->
+    <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg text-center">
+      <h2 id="q-text" class="text-xl md:text-2xl font-bold text-slate-100">Đang chờ giáo viên phát đề...</h2>
+    </div>
+
+    <!-- Answer Buttons Grid -->
+    <div class="grid grid-cols-2 gap-4" id="answers-grid">
+      <button onclick="submitAnswer('A')" id="btn-A" disabled class="answer-btn bg-red-600/50 opacity-50 text-white py-6 rounded-2xl font-black text-3xl shadow-lg border-2 border-transparent active:scale-95 transition-all">A</button>
+      <button onclick="submitAnswer('B')" id="btn-B" disabled class="answer-btn bg-blue-600/50 opacity-50 text-white py-6 rounded-2xl font-black text-3xl shadow-lg border-2 border-transparent active:scale-95 transition-all">B</button>
+      <button onclick="submitAnswer('C')" id="btn-C" disabled class="answer-btn bg-yellow-500/50 opacity-50 text-black py-6 rounded-2xl font-black text-3xl shadow-lg border-2 border-transparent active:scale-95 transition-all">C</button>
+      <button onclick="submitAnswer('D')" id="btn-D" disabled class="answer-btn bg-green-600/50 opacity-50 text-white py-6 rounded-2xl font-black text-3xl shadow-lg border-2 border-transparent active:scale-95 transition-all">D</button>
+    </div>
+  </main>
+
+  <!-- Footer Notification -->
+  <div class="text-center pb-2">
+    <p id="feedback-msg" class="text-xs font-semibold text-slate-400">Vui lòng chọn tên để bắt đầu trả lời.</p>
+  </div>
+
+  <script>
+    const firebaseConfig = { databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let currentStudentId = localStorage.getItem('plicked_student_id') || "";
+    let isScanning = false;
+    let selectedAnswer = null;
+
+    // Lắng nghe dữ liệu Firebase
+    db.ref().on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      const students = data.students || {};
+      const questions = data.questions || {};
+      const activeSession = data.activeSession || {};
+
+      renderStudentDropdown(students);
+
+      // Trạng thái phiên
+      const statusBadge = document.getElementById('session-status');
+      isScanning = activeSession.status === 'scanning';
+
+      if (isScanning) {
+        statusBadge.innerText = "Đang Nhận Bài";
+        statusBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase bg-green-500 text-white animate-pulse";
+      } else {
+        statusBadge.innerText = activeSession.status === 'locked' ? "Đã Khóa" : "Chờ";
+        statusBadge.className = "px-3 py-1 rounded-full text-xs font-bold uppercase bg-yellow-500 text-black";
+      }
+
+      // Nội dung câu hỏi
+      const qId = activeSession.currentQuestionId;
+      if (qId && questions[qId]) {
+        const q = questions[qId];
+        document.getElementById('q-text').innerText = q.text;
+      } else {
+        document.getElementById('q-text').innerText = "Đang chờ giáo viên phát đề...";
+      }
+
+      // Kiểm tra đáp án đã nộp
+      const responses = activeSession.responses || {};
+      if (currentStudentId && responses[currentStudentId]) {
+        selectedAnswer = responses[currentStudentId];
+      } else {
+        selectedAnswer = null;
+      }
+
+      updateButtonsState();
+    });
+
+    function renderStudentDropdown(students) {
+      const select = document.getElementById('select-student');
+      const currentVal = select.value;
+      
+      select.innerHTML = '<option value="">-- Chọn Tên Học Sinh --</option>';
+      Object.keys(students).forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.innerText = `${id}. ${students[id]}`;
+        if (id === currentStudentId) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+
+    function onStudentSelect() {
+      const select = document.getElementById('select-student');
+      currentStudentId = select.value;
+      localStorage.setItem('plicked_student_id', currentStudentId);
+      updateButtonsState();
+    }
+
+    function submitAnswer(ans) {
+      if (!currentStudentId) {
+        alert("Vui lòng chọn Tên học sinh trước khi bấm đáp án!");
+        return;
+      }
+      if (!isScanning) return;
+
+      selectedAnswer = ans;
+      db.ref(`activeSession/responses/${currentStudentId}`).set(ans);
+      updateButtonsState();
+    }
+
+    function updateButtonsState() {
+      const btnA = document.getElementById('btn-A');
+      const btnB = document.getElementById('btn-B');
+      const btnC = document.getElementById('btn-C');
+      const btnD = document.getElementById('btn-D');
+      const feedback = document.getElementById('feedback-msg');
+
+      const buttons = { A: btnA, B: btnB, C: btn C, D: btnD };
+
+      if (!currentStudentId) {
+        feedback.innerText = "Vui lòng chọn tên của bạn ở phía trên!";
+        feedback.className = "text-xs font-semibold text-yellow-400";
+        Object.values(buttons).forEach(btn => {
+          btn.disabled = true;
+          btn.classList.add('opacity-50');
+        });
+        return;
+      }
+
+      if (!isScanning) {
+        feedback.innerText = selectedAnswer ? `Đã ghi nhận đáp án ${selectedAnswer}. (Đã khóa phiên)` : "Phiên làm bài chưa mở hoặc đã kết thúc.";
+        feedback.className = "text-xs font-semibold text-slate-400";
+        Object.values(buttons).forEach(btn => {
+          btn.disabled = true;
+          btn.classList.add('opacity-50');
+        });
+        return;
+      }
+
+      // Đang trong phiên quét/làm bài
+      feedback.innerText = selectedAnswer ? `Bạn đã chọn đáp án ${selectedAnswer} (Có thể chọn lại)` : "Chạm vào A, B, C hoặc D để nộp bài";
+      feedback.className = "text-xs font-semibold text-green-400";
+
+      ['A', 'B', 'C', 'D'].forEach(ans => {
+        const btn = buttons[ans];
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+
+        if (selectedAnswer === ans) {
+          btn.classList.add('ring-4', 'ring-white', 'scale-105', 'opacity-100');
+        } else {
+          btn.classList.remove('ring-4', 'ring-white', 'scale-105');
+        }
+      });
+    }
+  </script>
+</body>
+</html>
