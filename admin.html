@@ -132,14 +132,12 @@
         <!-- Danh sách ngân hàng câu hỏi -->
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
           <h2 class="text-lg font-bold text-slate-800 border-b pb-3 mb-4">📚 Ngân Hàng Câu Hỏi</h2>
-          <div id="questions-list" class="space-y-3 max-h-80 overflow-y-auto pr-1">
-            <!-- Render danh sách câu hỏi ở đây -->
-          </div>
+          <div id="questions-list" class="space-y-3 max-h-80 overflow-y-auto pr-1"></div>
         </div>
 
       </div>
 
-      <!-- RIGHT COLUMN: Quản lý học sinh & Excel (5 cols) -->
+      <!-- RIGHT COLUMN: Quản lý học sinh & CRUD trực tiếp (5 cols) -->
       <div class="lg:col-span-5 space-y-6">
         
         <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
@@ -148,14 +146,26 @@
             <span class="text-2xl font-black text-blue-600" id="student-count">0</span>
           </div>
 
+          <!-- Thêm nhanh 1 học sinh mới -->
+          <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+            <span class="text-xs font-bold text-slate-600">Thêm lẻ 1 học sinh:</span>
+            <div class="flex gap-2">
+              <input type="number" id="input-student-id" placeholder="STT" class="w-20 p-2 border border-slate-300 rounded-lg text-sm font-bold">
+              <input type="text" id="input-student-name" placeholder="Họ và tên học sinh" class="flex-1 p-2 border border-slate-300 rounded-lg text-sm">
+              <button onclick="addSingleStudent()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded-lg text-xs transition-all">
+                Thêm
+              </button>
+            </div>
+          </div>
+
+          <!-- Nhập từ File Excel -->
           <div>
             <label class="block text-xs font-bold text-slate-600 mb-1">Nhập từ File Excel (.xlsx, .csv):</label>
             <input type="file" id="excel-file" accept=".xlsx, .xls, .csv" onchange="handleExcelUpload(event)" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-300 rounded-xl cursor-pointer">
           </div>
 
-          <div id="students-preview" class="max-h-96 overflow-y-auto border border-slate-200 rounded-xl p-2 divide-y text-sm">
-            <!-- Xem nhanh danh sách học sinh -->
-          </div>
+          <!-- Danh sách Học sinh hỗ trợ Sửa & Xóa -->
+          <div id="students-preview" class="max-h-96 overflow-y-auto border border-slate-200 rounded-xl p-2 divide-y text-sm"></div>
         </div>
 
       </div>
@@ -163,7 +173,7 @@
     </div>
   </div>
 
-  <!-- Printable Area (Ẩn khi xem Web, Hiện khi In A4) -->
+  <!-- Printable Area -->
   <div class="max-w-5xl mx-auto">
     <div id="print-area" class="grid grid-cols-2 gap-6"></div>
   </div>
@@ -178,7 +188,6 @@
     let activeTimer = null;
     let timerSecondsLeft = 0;
 
-    // Load dữ liệu Firebase ban đầu
     db.ref().on('value', (snapshot) => {
       const data = snapshot.val() || {};
       students = data.students || {};
@@ -213,7 +222,6 @@
       };
 
       db.ref(`questions/${qId}`).set(newQ).then(() => {
-        // Reset form
         document.getElementById('input-q-text').value = '';
         document.getElementById('input-opt-a').value = '';
         document.getElementById('input-opt-b').value = '';
@@ -274,7 +282,6 @@
 
       db.ref('activeSession').set(sessionData);
 
-      // Chạy đồng hồ đếm ngược
       timerSecondsLeft = q.timer;
       updateTimerDisplay();
 
@@ -323,7 +330,41 @@
       }
     }
 
-    // 2. Quản Lý Học Sinh & Excel
+    // 2. Quản Lý Học Sinh (Excel & Thêm / Sửa / Xóa Trực Tiếp)
+    function addSingleStudent() {
+      const idInput = document.getElementById('input-student-id');
+      const nameInput = document.getElementById('input-student-name');
+      const id = parseInt(idInput.value);
+      const name = nameInput.value.trim();
+
+      if (!id || !name) {
+        alert("Vui lòng nhập đầy đủ STT và Họ tên học sinh!");
+        return;
+      }
+
+      students[id] = name;
+      db.ref(`students/${id}`).set(name).then(() => {
+        idInput.value = '';
+        nameInput.value = '';
+      });
+    }
+
+    function editStudent(id) {
+      const currentName = students[id];
+      const newName = prompt(`Sửa tên cho học sinh STT ${id}:`, currentName);
+      if (newName !== null && newName.trim() !== "") {
+        students[id] = newName.trim();
+        db.ref(`students/${id}`).set(newName.trim());
+      }
+    }
+
+    function deleteStudent(id) {
+      if (confirm(`Bạn có chắc muốn xóa học sinh STT ${id} (${students[id]})?`)) {
+        delete students[id];
+        db.ref(`students/${id}`).remove();
+      }
+    }
+
     function handleExcelUpload(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -357,8 +398,6 @@
 
         if (Object.keys(newStudents).length > 0) {
           students = newStudents;
-          renderStudentsPreview();
-          renderCards();
           saveStudentsToFirebase();
         }
       };
@@ -381,8 +420,17 @@
 
       ids.forEach(id => {
         const item = document.createElement('div');
-        item.className = "py-2 px-1 flex justify-between items-center";
-        item.innerHTML = `<span class="font-bold text-blue-600">STT ${id}</span> <span class="font-semibold text-slate-700">${students[id]}</span>`;
+        item.className = "py-2 px-2 flex justify-between items-center hover:bg-slate-50 rounded-lg transition-all";
+        item.innerHTML = `
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-blue-600 w-14">STT ${id}</span>
+            <span class="font-semibold text-slate-700">${students[id]}</span>
+          </div>
+          <div class="flex space-x-1">
+            <button onclick="editStudent(${id})" title="Sửa tên" class="text-slate-400 hover:text-blue-600 p-1 text-xs">✏️ Sửa</button>
+            <button onclick="deleteStudent(${id})" title="Xóa học sinh" class="text-slate-400 hover:text-red-600 p-1 text-xs">🗑️ Xóa</button>
+          </div>
+        `;
         container.appendChild(item);
       });
     }
