@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlickEd - Màn Hình Trình Chiếu</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen p-6 flex flex-col justify-between font-sans">
+  <header class="flex justify-between items-center border-b border-slate-700 pb-4">
+    <div class="flex items-center space-x-3">
+      <span class="text-3xl font-extrabold text-blue-500 tracking-wider">PlickEd</span>
+      <span id="session-status" class="px-3 py-1 rounded-full text-xs font-bold bg-yellow-500 text-black uppercase">Chờ quét</span>
+    </div>
+    <div id="stats-summary" class="text-xl font-semibold text-slate-300">
+      Đã nộp bài: <span id="submitted-count" class="text-green-400 font-bold">0</span> / <span id="total-students">0</span>
+    </div>
+  </header>
+
+  <main class="grid grid-cols-1 lg:grid-cols-3 gap-6 my-auto pt-4">
+    <div class="lg:col-span-2 space-y-6">
+      <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
+        <h2 id="question-text" class="text-2xl md:text-3xl font-bold text-slate-100">Đang tải câu hỏi...</h2>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="options-container">
+        <div id="opt-A" class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center space-x-4">
+          <span class="w-10 h-10 rounded-lg bg-red-600 text-white font-extrabold text-xl flex items-center justify-center">A</span>
+          <span class="option-text text-lg text-slate-200">---</span>
+        </div>
+        <div id="opt-B" class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center space-x-4">
+          <span class="w-10 h-10 rounded-lg bg-blue-600 text-white font-extrabold text-xl flex items-center justify-center">B</span>
+          <span class="option-text text-lg text-slate-200">---</span>
+        </div>
+        <div id="opt-C" class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center space-x-4">
+          <span class="w-10 h-10 rounded-lg bg-yellow-500 text-black font-extrabold text-xl flex items-center justify-center">C</span>
+          <span class="option-text text-lg text-slate-200">---</span>
+        </div>
+        <div id="opt-D" class="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center space-x-4">
+          <span class="w-10 h-10 rounded-lg bg-green-600 text-white font-extrabold text-xl flex items-center justify-center">D</span>
+          <span class="option-text text-lg text-slate-200">---</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="space-y-6">
+      <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700">
+        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Danh sách Lớp</h3>
+        <div id="students-grid" class="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto p-1"></div>
+      </div>
+      <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 flex flex-col items-center">
+        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Thống kê đáp án</h3>
+        <div class="w-full h-48">
+          <canvas id="responseChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const firebaseConfig = { databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let studentsData = {}, questionsData = {};
+    const ctx = document.getElementById('responseChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['A', 'B', 'C', 'D'],
+        datasets: [{ data: [0, 0, 0, 0], backgroundColor: ['#ef4444', '#3b82f6', '#eab308', '#22c55e'], borderRadius: 8 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: { stepSize: 1, color: '#94a3b8' }, grid: { color: '#334155' } },
+          x: { ticks: { color: '#f8fafc', font: { weight: 'bold', size: 14 } }, grid: { display: false } }
+        }
+      }
+    });
+
+    db.ref().on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+
+      studentsData = data.students || {};
+      questionsData = data.questions || {};
+      const activeSession = data.activeSession || {};
+
+      document.getElementById('total-students').innerText = Object.keys(studentsData).length;
+      const qId = activeSession.currentQuestionId;
+      if (qId && questionsData[qId]) {
+        const q = questionsData[qId];
+        document.getElementById('question-text').innerText = q.text;
+        document.querySelector('#opt-A .option-text').innerText = q.options.A;
+        document.querySelector('#opt-B .option-text').innerText = q.options.B;
+        document.querySelector('#opt-C .option-text').innerText = q.options.C;
+        document.querySelector('#opt-D .option-text').innerText = q.options.D;
+      }
+
+      const statusBadge = document.getElementById('session-status');
+      statusBadge.innerText = activeSession.status === 'scanning' ? 'Đang quét' : (activeSession.status === 'locked' ? 'Đã khóa' : 'Chờ');
+      statusBadge.className = `px-3 py-1 rounded-full text-xs font-bold uppercase ${
+        activeSession.status === 'scanning' ? 'bg-green-500 text-black animate-pulse' : 'bg-yellow-500 text-black'
+      }`;
+
+      const responses = activeSession.responses || {};
+      const counts = { A: 0, B: 0, C: 0, D: 0 };
+      let submittedCount = 0;
+      const grid = document.getElementById('students-grid');
+      grid.innerHTML = '';
+
+      Object.keys(studentsData).forEach(id => {
+        const answer = responses[id];
+        const isAnswered = !!answer;
+        if (isAnswered) {
+          submittedCount++;
+          if (counts[answer] !== undefined) counts[answer]++;
+        }
+        const badge = document.createElement('div');
+        badge.className = `p-2 text-center rounded-lg font-bold text-xs transition-all ${
+          isAnswered ? 'bg-green-600 text-white shadow-lg scale-105' : 'bg-slate-700 text-slate-400'
+        }`;
+        badge.innerText = `${id}. ${studentsData[id].split(' ').pop()}`;
+        grid.appendChild(badge);
+      });
+
+      document.getElementById('submitted-count').innerText = submittedCount;
+      chart.data.datasets[0].data = [counts.A, counts.B, counts.C, counts.D];
+      chart.update();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+﻿{
+  "activeSession": {
+    "currentQuestionId": "q1",
+    "status": "waiting",
+    "responses": {}
+  },
+  "questions": {
+    "q1": {
+      "text": "Đâu là thủ đô của Việt Nam?",
+      "options": {
+        "A": "Đà Nẵng",
+        "B": "Hà Nội",
+        "C": "TP. Hồ Chí Minh",
+        "D": "Hải Phòng"
+      },
+      "correct": "B"
+    }
+  },
+  "students": {
+    "1": "Nguyễn Văn A",
+    "2": "Trần Thị B",
+    "3": "Lê Văn C",
+    "4": "Phạm Văn D",
+    "5": "Hoàng Thị E"
+  }
+}

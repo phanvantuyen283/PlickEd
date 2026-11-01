@@ -1,0 +1,117 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PlickEd - Quét Mã</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/jsviz/jsaruco/src/cv.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/jsviz/jsaruco/src/aruco.js"></script>
+</head>
+<body class="bg-black text-white h-screen flex flex-col justify-between font-sans overflow-hidden">
+  <div class="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center z-10">
+    <div>
+      <h1 class="text-lg font-bold text-blue-400">PlickEd Quét Mã</h1>
+      <p id="scan-feedback" class="text-xs text-slate-400">Sẵn sàng quét...</p>
+    </div>
+    <div id="scanned-count-badge" class="bg-blue-600 px-3 py-1 rounded-full text-sm font-bold">
+      Đã nhận: <span id="scanned-count">0</span>
+    </div>
+  </div>
+
+  <div class="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
+    <video id="webcam" autoplay playsinline class="w-full h-full object-cover"></video>
+    <canvas id="canvas" class="hidden"></canvas>
+    <div id="scan-overlay" class="absolute inset-0 border-4 border-dashed border-blue-500/30 pointer-events-none flex items-center justify-center">
+      <p class="text-xs text-slate-500 bg-black/50 px-2 py-1 rounded">Hướng camera về phía thẻ học sinh</p>
+    </div>
+  </div>
+
+  <div class="p-4 bg-slate-900 border-t border-slate-800 grid grid-cols-2 gap-3 z-10">
+    <button id="btn-toggle-scan" onclick="toggleScan()" class="bg-green-600 active:bg-green-700 py-3 rounded-xl font-bold text-center text-lg shadow-lg">
+      Bắt đầu quét
+    </button>
+    <button id="btn-reset" onclick="resetSession()" class="bg-red-600/80 active:bg-red-700 py-3 rounded-xl font-bold text-center text-lg text-slate-200">
+      Xóa câu này
+    </button>
+  </div>
+
+  <script>
+    const firebaseConfig = { databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let isScanning = false, scanInterval = null, detector = new AR.Detector(), localResponses = {};
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => { video.srcObject = stream; })
+      .catch(err => alert("Không thể mở Camera. Vui lòng cấp quyền!"));
+
+    function toggleScan() {
+      isScanning = !isScanning;
+      const btn = document.getElementById('btn-toggle-scan');
+      if (isScanning) {
+        btn.innerText = "Tạm dừng";
+        btn.className = "bg-yellow-600 active:bg-yellow-700 py-3 rounded-xl font-bold text-center text-lg shadow-lg";
+        db.ref('activeSession/status').set('scanning');
+        scanInterval = setInterval(processFrame, 250);
+      } else {
+        btn.innerText = "Bắt đầu quét";
+        btn.className = "bg-green-600 active:bg-green-700 py-3 rounded-xl font-bold text-center text-lg shadow-lg";
+        db.ref('activeSession/status').set('locked');
+        clearInterval(scanInterval);
+      }
+    }
+
+    function processFrame() {
+      if (!video.videoWidth) return;
+      canvas.width = 640;
+      canvas.height = (video.videoHeight / video.videoWidth) * 640;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const markers = detector.detect(imageData);
+
+      if (markers.length > 0) {
+        let newDetected = 0;
+        markers.forEach(marker => {
+          const studentId = marker.id;
+          const answer = getAnswerFromCorners(marker.corners);
+          if (!localResponses[studentId] || localResponses[studentId] !== answer) {
+            localResponses[studentId] = answer;
+            db.ref(`activeSession/responses/${studentId}`).set(answer);
+            newDetected++;
+          }
+        });
+        if (newDetected > 0) {
+          document.getElementById('scan-feedback').innerText = `Vừa phát hiện ${newDetected} thẻ mới!`;
+          document.getElementById('scanned-count').innerText = Object.keys(localResponses).length;
+        }
+      }
+    }
+
+    function getAnswerFromCorners(corners) {
+      const dx = corners[1].x - corners[0].x;
+      const dy = corners[1].y - corners[0].y;
+      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      if (angle >= -45 && angle < 45) return 'A';
+      if (angle >= 45 && angle < 135) return 'B';
+      if (angle >= -135 && angle < -45) return 'D';
+      return 'C';
+    }
+
+    function resetSession() {
+      if (confirm("Xóa toàn bộ đáp án của câu hỏi hiện tại?")) {
+        localResponses = {};
+        document.getElementById('scanned-count').innerText = "0";
+        db.ref('activeSession/responses').remove();
+      }
+    }
+  </script>
+</body>
+</html>
