@@ -1,0 +1,14 @@
+﻿{
+  "name": "PlickEd_Scanner",
+  "short_name": "PlickEd_Scanner",
+  "id": "/PlickEd/scanner.html",
+  "start_url": "scanner.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#16a34a",
+  "icons": [
+    { "src": "icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
