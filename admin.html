@@ -1,0 +1,451 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlickEd - Trung Tâm Điều Hành & In Thẻ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <!-- SheetJS để đọc file Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    @media print {
+      body * { visibility: hidden; }
+      #print-area, #print-area * { visibility: visible; }
+      #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+      .no-print { display: none !important; }
+      .page-break { page-break-after: always; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 font-sans p-4 md:p-6">
+
+  <div class="max-w-7xl mx-auto space-y-6 no-print">
+    <!-- Header Controls -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col md:flex-row justify-between items-center gap-4">
+      <div>
+        <h1 class="text-2xl font-black text-blue-600 flex items-center gap-2">
+          <span>PlickEd Admin</span>
+          <span id="live-badge" class="text-xs bg-green-500 text-white px-2.5 py-1 rounded-full uppercase tracking-wider font-bold">Online</span>
+        </h1>
+        <p class="text-xs text-slate-500 mt-1">Điều hành câu hỏi, đếm ngược thời gian, quản lý danh sách học sinh và xuất thẻ A4</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="saveStudentsToFirebase()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow transition-all">
+          💾 Lưu danh sách Lớp
+        </button>
+        <button onclick="window.print()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow transition-all">
+          🖨️ In bộ thẻ A4
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Dashboard Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- LEFT COLUMN: Soạn đề & Quản lý phiên đếm giờ (7 cols) -->
+      <div class="lg:col-span-7 space-y-6">
+        
+        <!-- Live Session Control Box -->
+        <div class="bg-slate-900 text-white rounded-2xl p-6 shadow-xl border border-slate-800">
+          <div class="flex justify-between items-center border-b border-slate-800 pb-4 mb-4">
+            <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Phiên Trả Lời Hiện Tại</span>
+            <span id="session-status" class="px-3 py-1 rounded-full text-xs font-extrabold uppercase bg-yellow-500 text-black">Chờ phát đề</span>
+          </div>
+
+          <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+              <h3 id="current-q-title" class="text-lg font-bold text-slate-100">Chưa chọn câu hỏi</h3>
+              <p id="current-q-sub" class="text-xs text-slate-400">Chọn câu hỏi bên dưới và bấm "Phát đề & Bắt đầu tính giờ"</p>
+            </div>
+            
+            <!-- Big Countdown Clock -->
+            <div class="flex items-center gap-3 bg-slate-800 px-5 py-3 rounded-2xl border border-slate-700">
+              <span class="text-xs font-bold text-slate-400 uppercase">Còn lại:</span>
+              <span id="timer-display" class="text-3xl font-black text-yellow-400 font-mono">00s</span>
+            </div>
+          </div>
+
+          <!-- Session Action Buttons -->
+          <div class="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-slate-800">
+            <button id="btn-stop-timer" onclick="stopSession()" class="bg-red-600/80 hover:bg-red-600 text-white font-bold py-2.5 rounded-xl text-sm transition-all">
+              🔒 Khóa / Dừng nhận bài
+            </button>
+            <button onclick="clearResponses()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-2.5 rounded-xl text-sm transition-all">
+              🧹 Xóa kết quả câu này
+            </button>
+          </div>
+        </div>
+
+        <!-- Form Soạn Câu Hỏi Mới -->
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
+          <h2 class="text-lg font-bold text-slate-800 border-b pb-3">➕ Soạn Câu Hỏi Mới</h2>
+          
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Nội dung câu hỏi:</label>
+            <textarea id="input-q-text" rows="2" placeholder="Ví dụ: Thủ đô của Việt Nam là gì?" class="w-full p-3 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"></textarea>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-red-600 mb-1">Đáp án A:</label>
+              <input type="text" id="input-opt-a" placeholder="Lựa chọn A" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-blue-600 mb-1">Đáp án B:</label>
+              <input type="text" id="input-opt-b" placeholder="Lựa chọn B" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-yellow-600 mb-1">Đáp án C:</label>
+              <input type="text" id="input-opt-c" placeholder="Lựa chọn C" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-green-600 mb-1">Đáp án D:</label>
+              <input type="text" id="input-opt-d" placeholder="Lựa chọn D" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 pt-2">
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Đáp án Đúng:</label>
+              <select id="input-correct" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm bg-white font-bold">
+                <option value="A">Đáp án A</option>
+                <option value="B">Đáp án B</option>
+                <option value="C">Đáp án C</option>
+                <option value="D">Đáp án D</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-600 mb-1">Thời gian đếm ngược (giây):</label>
+              <input type="number" id="input-timer" value="30" min="5" max="300" class="w-full p-2.5 border border-slate-300 rounded-xl text-sm font-bold">
+            </div>
+          </div>
+
+          <button onclick="addQuestion()" class="w-full bg-slate-900 hover:bg-black text-white font-bold py-3 rounded-xl shadow-md transition-all text-sm">
+            💾 Lưu Câu Hỏi Vào Ngân Hàng
+          </button>
+        </div>
+
+        <!-- Danh sách ngân hàng câu hỏi -->
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <h2 class="text-lg font-bold text-slate-800 border-b pb-3 mb-4">📚 Ngân Hàng Câu Hỏi</h2>
+          <div id="questions-list" class="space-y-3 max-h-80 overflow-y-auto pr-1">
+            <!-- Render danh sách câu hỏi ở đây -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: Quản lý học sinh & Excel (5 cols) -->
+      <div class="lg:col-span-5 space-y-6">
+        
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
+          <div class="flex justify-between items-center border-b pb-3">
+            <h2 class="text-lg font-bold text-slate-800">👨‍🎓 Danh Sách Lớp</h2>
+            <span class="text-2xl font-black text-blue-600" id="student-count">0</span>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Nhập từ File Excel (.xlsx, .csv):</label>
+            <input type="file" id="excel-file" accept=".xlsx, .xls, .csv" onchange="handleExcelUpload(event)" class="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-slate-300 rounded-xl cursor-pointer">
+          </div>
+
+          <div id="students-preview" class="max-h-96 overflow-y-auto border border-slate-200 rounded-xl p-2 divide-y text-sm">
+            <!-- Xem nhanh danh sách học sinh -->
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Printable Area (Ẩn khi xem Web, Hiện khi In A4) -->
+  <div class="max-w-5xl mx-auto">
+    <div id="print-area" class="grid grid-cols-2 gap-6"></div>
+  </div>
+
+  <script>
+    const firebaseConfig = { databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let students = {};
+    let questions = {};
+    let activeTimer = null;
+    let timerSecondsLeft = 0;
+
+    // Load dữ liệu Firebase ban đầu
+    db.ref().on('value', (snapshot) => {
+      const data = snapshot.val() || {};
+      students = data.students || {};
+      questions = data.questions || {};
+      
+      renderQuestionsList();
+      renderStudentsPreview();
+      renderCards();
+    });
+
+    // 1. Quản lý Câu Hỏi & Phát Đề
+    function addQuestion() {
+      const text = document.getElementById('input-q-text').value.trim();
+      const optA = document.getElementById('input-opt-a').value.trim();
+      const optB = document.getElementById('input-opt-b').value.trim();
+      const optC = document.getElementById('input-opt-c').value.trim();
+      const optD = document.getElementById('input-opt-d').value.trim();
+      const correct = document.getElementById('input-correct').value;
+      const timer = parseInt(document.getElementById('input-timer').value) || 30;
+
+      if (!text || !optA || !optB) {
+        alert("Vui lòng điền nội dung câu hỏi và ít nhất 2 đáp án A, B!");
+        return;
+      }
+
+      const qId = "q_" + Date.now();
+      const newQ = {
+        text: text,
+        options: { A: optA, B: optB, C: optC, D: optD },
+        correct: correct,
+        timer: timer
+      };
+
+      db.ref(`questions/${qId}`).set(newQ).then(() => {
+        // Reset form
+        document.getElementById('input-q-text').value = '';
+        document.getElementById('input-opt-a').value = '';
+        document.getElementById('input-opt-b').value = '';
+        document.getElementById('input-opt-c').value = '';
+        document.getElementById('input-opt-d').value = '';
+      });
+    }
+
+    function renderQuestionsList() {
+      const container = document.getElementById('questions-list');
+      container.innerHTML = '';
+      const qKeys = Object.keys(questions);
+
+      if (qKeys.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-400 italic">Chưa có câu hỏi nào. Hãy tạo ở ô phía trên!</p>`;
+        return;
+      }
+
+      qKeys.forEach((key, index) => {
+        const q = questions[key];
+        const card = document.createElement('div');
+        card.className = "p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-3";
+        card.innerHTML = `
+          <div class="space-y-1">
+            <span class="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Câu ${index + 1} (${q.timer}s)</span>
+            <p class="font-bold text-sm text-slate-800">${q.text}</p>
+            <p class="text-xs text-slate-500">Đúng: <b class="text-green-600">${q.correct}</b> | A: ${q.options.A} | B: ${q.options.B}</p>
+          </div>
+          <div class="flex gap-2 w-full md:w-auto">
+            <button onclick="activateQuestion('${key}')" class="flex-1 md:flex-none bg-green-600 hover:bg-green-700 text-white font-bold text-xs px-3 py-2 rounded-lg shadow">
+              🚀 Phát Đề & Đếm Giờ
+            </button>
+            <button onclick="deleteQuestion('${key}')" class="text-red-500 hover:text-red-700 font-bold text-xs p-2">
+              🗑️
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function activateQuestion(qId) {
+      const q = questions[qId];
+      if (!q) return;
+
+      clearInterval(activeTimer);
+
+      document.getElementById('current-q-title').innerText = q.text;
+      document.getElementById('current-q-sub').innerText = `Đáp án đúng: ${q.correct} | Thời gian: ${q.timer} giây`;
+      
+      const sessionData = {
+        currentQuestionId: qId,
+        status: 'scanning',
+        responses: {},
+        timerDuration: q.timer,
+        startTime: Date.now()
+      };
+
+      db.ref('activeSession').set(sessionData);
+
+      // Chạy đồng hồ đếm ngược
+      timerSecondsLeft = q.timer;
+      updateTimerDisplay();
+
+      activeTimer = setInterval(() => {
+        timerSecondsLeft--;
+        updateTimerDisplay();
+
+        if (timerSecondsLeft <= 0) {
+          stopSession();
+        }
+      }, 1000);
+    }
+
+    function updateTimerDisplay() {
+      const statusBadge = document.getElementById('session-status');
+      const timerDisplay = document.getElementById('timer-display');
+
+      if (timerSecondsLeft > 0) {
+        statusBadge.innerText = "Đang Quét";
+        statusBadge.className = "px-3 py-1 rounded-full text-xs font-extrabold uppercase bg-green-500 text-white animate-pulse";
+        timerDisplay.innerText = `${timerSecondsLeft}s`;
+        timerDisplay.className = "text-3xl font-black text-yellow-400 font-mono";
+      } else {
+        statusBadge.innerText = "Đã Khóa";
+        statusBadge.className = "px-3 py-1 rounded-full text-xs font-extrabold uppercase bg-red-600 text-white";
+        timerDisplay.innerText = "00s";
+        timerDisplay.className = "text-3xl font-black text-slate-500 font-mono";
+      }
+    }
+
+    function stopSession() {
+      clearInterval(activeTimer);
+      timerSecondsLeft = 0;
+      updateTimerDisplay();
+      db.ref('activeSession/status').set('locked');
+    }
+
+    function clearResponses() {
+      db.ref('activeSession/responses').remove();
+      alert("Đã xóa kết quả làm bài của câu hỏi hiện tại!");
+    }
+
+    function deleteQuestion(qId) {
+      if (confirm("Bạn muốn xóa câu hỏi này khỏi ngân hàng?")) {
+        db.ref(`questions/${qId}`).remove();
+      }
+    }
+
+    // 2. Quản Lý Học Sinh & Excel
+    function handleExcelUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+
+        const newStudents = {};
+        let autoId = 1;
+
+        json.forEach((row, index) => {
+          if (index === 0 || !row || row.length === 0) return;
+          let id = autoId;
+          let name = "";
+
+          if (row.length >= 2 && !isNaN(parseInt(row[0]))) {
+            id = parseInt(row[0]);
+            name = String(row[1]).trim();
+          } else {
+            name = String(row[0]).trim();
+          }
+
+          if (name && name !== "Họ và tên") {
+            newStudents[id] = name;
+            autoId = Math.max(autoId, id + 1);
+          }
+        });
+
+        if (Object.keys(newStudents).length > 0) {
+          students = newStudents;
+          renderStudentsPreview();
+          renderCards();
+          saveStudentsToFirebase();
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function saveStudentsToFirebase() {
+      db.ref('students').set(students)
+        .then(() => alert("✅ Đã đồng bộ danh sách học sinh lên Firebase!"))
+        .catch(err => alert("❌ Lỗi: " + err.message));
+    }
+
+    function renderStudentsPreview() {
+      const container = document.getElementById('students-preview');
+      const countLabel = document.getElementById('student-count');
+      const ids = Object.keys(students).map(Number).sort((a, b) => a - b);
+      
+      countLabel.innerText = ids.length;
+      container.innerHTML = '';
+
+      ids.forEach(id => {
+        const item = document.createElement('div');
+        item.className = "py-2 px-1 flex justify-between items-center";
+        item.innerHTML = `<span class="font-bold text-blue-600">STT ${id}</span> <span class="font-semibold text-slate-700">${students[id]}</span>`;
+        container.appendChild(item);
+      });
+    }
+
+    // 3. Render Thẻ ArUco In A4
+    function renderCards() {
+      const container = document.getElementById('print-area');
+      container.innerHTML = '';
+      const ids = Object.keys(students).map(Number).sort((a, b) => a - b);
+
+      ids.forEach((id) => {
+        const card = document.createElement('div');
+        card.className = "bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 flex flex-col items-center justify-between h-[13cm] w-full box-border relative page-break";
+        
+        card.innerHTML = `
+          <div class="text-2xl font-black text-slate-800 tracking-widest">A</div>
+          <div class="flex items-center justify-between w-full">
+            <div class="text-2xl font-black text-slate-800 tracking-widest">D</div>
+            <canvas id="aruco-${id}" width="240" height="240" class="border-4 border-black"></canvas>
+            <div class="text-2xl font-black text-slate-800 tracking-widest">B</div>
+          </div>
+          <div class="flex flex-col items-center w-full">
+            <div class="text-2xl font-black text-slate-800 tracking-widest mb-2">C</div>
+            <div class="w-full pt-2 border-t-2 border-slate-800 text-center">
+              <span class="text-xl font-black text-blue-700">Mã: ${id}</span> - 
+              <span class="text-xl font-bold text-slate-900">${students[id]}</span>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+        drawArUcoMarker(`aruco-${id}`, id);
+      });
+    }
+
+    function drawArUcoMarker(canvasId, id) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const size = 240, gridSize = 7, cellSize = size / gridSize;
+
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, size, size);
+
+      const rowCodes = [[1, 0, 0, 0, 0], [1, 0, 1, 1, 1], [0, 1, 0, 0, 1], [0, 1, 1, 1, 0]];
+      const digits = [(id >> 8) & 3, (id >> 6) & 3, (id >> 4) & 3, (id >> 2) & 3, id & 3];
+
+      ctx.fillStyle = "black";
+      for (let i = 0; i < gridSize; i++) {
+        ctx.fillRect(i * cellSize, 0, cellSize, cellSize);
+        ctx.fillRect(i * cellSize, (gridSize - 1) * cellSize, cellSize, cellSize);
+        ctx.fillRect(0, i * cellSize, cellSize, cellSize);
+        ctx.fillRect((gridSize - 1) * cellSize, i * cellSize, cellSize, cellSize);
+      }
+
+      for (let r = 0; r < 5; r++) {
+        const rowBits = rowCodes[digits[r]];
+        for (let c = 0; c < 5; c++) {
+          if (rowBits[c] === 0) {
+            ctx.fillRect((c + 1) * cellSize, (r + 1) * cellSize, cellSize, cellSize);
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>
