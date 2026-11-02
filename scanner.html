@@ -3,55 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PlickEd - Scanner Fix Edge</title>
+  <title>PlickEd - Scanner Fix FacingMode</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-  <!-- jsaruco Library -->
   <script src="https://cdn.jsdelivr.net/gh/jsviz/jsaruco/src/cv.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/jsviz/jsaruco/src/aruco.js"></script>
-  <link rel="manifest" href="manifest-scanner.json">
+  <link rel="manifest" href="./manifest-scanner.json">
+  <link rel="icon" type="image/png" href="./icon.png">
   <script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js");}</script>
 </head>
 <body class="bg-black text-white min-h-screen flex flex-col justify-between font-sans overflow-hidden">
 
-  <!-- Header Section & Camera Select -->
+  <!-- Header Section -->
   <div class="p-3 bg-slate-900 border-b border-slate-800 flex flex-col gap-2 z-10">
     <div class="flex justify-between items-center">
       <h1 class="text-base font-black text-green-400 flex items-center gap-1.5">
         <span>PlickEd Scanner</span>
         <span id="cam-status" class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
       </h1>
-      <span id="info-text" class="text-xs text-slate-300">Đang tìm Camera...</span>
+      <span id="info-text" class="text-xs text-slate-300">Đang khởi tạo...</span>
     </div>
 
-    <!-- Dropdown Chọn Đích Danh Camera phần cứng -->
+    <!-- Dropdown Chọn Camera -->
     <div class="flex gap-2">
       <select id="camera-select" onchange="startSelectedCamera()" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none">
-        <option value="">-- Đang tìm danh sách Camera --</option>
+        <option value="">-- Đang tìm Camera --</option>
       </select>
-      <button onclick="getDevicesAndInit()" class="bg-blue-600 hover:bg-blue-700 text-xs px-3 py-2 rounded-lg font-bold">
-        🔄 Tìm lại
+      <button onclick="startCameraManual()" class="bg-green-600 hover:bg-green-700 text-xs px-3 py-2 rounded-lg font-bold text-white shadow">
+        🔄 Thử lại
       </button>
     </div>
   </div>
 
   <!-- Camera Viewport Area -->
   <div class="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
-    <video id="webcam" autoplay playsinline muted class="w-full h-full object-cover"></video>
+    <video id="webcam" autoplay playsinline muted webkit-playsinline class="w-full h-full object-cover"></video>
     <canvas id="canvas" class="hidden"></canvas>
 
     <!-- Overlay HUD Grid -->
     <div class="absolute inset-0 border-2 border-green-500/30 pointer-events-none flex items-center justify-center">
-      <div class="w-64 h-64 border-2 border-dashed border-green-400/60 rounded-3xl animate-pulse"></div>
+      <div class="w-72 h-72 border-2 border-dashed border-green-400/60 rounded-3xl animate-pulse"></div>
     </div>
 
-    <!-- Error/Help Box -->
-    <div id="error-box" class="hidden absolute inset-4 bg-slate-900/95 rounded-2xl p-6 flex flex-col items-center justify-center text-center z-20 space-y-3">
-      <span class="text-4xl">⚠️</span>
-      <h3 class="text-base font-bold text-red-400">Không mở được luồng Video</h3>
-      <p id="error-msg" class="text-xs text-slate-300">Hãy chọn một Camera khác trong danh sách ở trên đỉnh màn hình.</p>
+    <!-- Overlay Nút Bật Camera Thủ Công -->
+    <div id="start-overlay" class="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center z-20 space-y-4">
+      <div class="w-16 h-16 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center text-3xl">📷</div>
+      <h2 class="text-lg font-bold text-white">Sẵn Sàng Quét Thẻ</h2>
+      <p class="text-xs text-slate-400 max-w-xs">Nhấn nút bên dưới để bắt đầu kết nối camera thiết bị.</p>
+      <button onclick="startCameraManual()" class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-6 py-3 rounded-xl shadow-lg transition-all active:scale-95">
+        🚀 BẬT CAMERA QUÉT
+      </button>
     </div>
   </div>
 
@@ -61,7 +63,7 @@
       <span class="text-slate-400">Đã quét:</span>
       <span id="scanned-count" class="font-extrabold text-green-400 text-sm">0</span>
     </div>
-    <span id="last-scan" class="text-slate-400 truncate max-w-[200px]">Chưa nhận diện</span>
+    <span id="last-scan" class="text-slate-400 truncate max-w-[220px]">Chưa nhận diện</span>
   </div>
 
   <script>
@@ -75,6 +77,7 @@
     const cameraSelect = document.getElementById('camera-select');
     const camStatus = document.getElementById('cam-status');
     const infoText = document.getElementById('info-text');
+    const startOverlay = document.getElementById('start-overlay');
 
     let detector = new AR.Detector();
     let currentStream = null;
@@ -84,7 +87,7 @@
     db.ref('activeSession').on('value', (snapshot) => {
       activeSession = snapshot.val();
       if (activeSession && activeSession.status === 'scanning') {
-        infoText.innerText = "Đang nhận dạng...";
+        infoText.innerText = "Đang quét...";
         infoText.className = "text-xs text-green-400 font-semibold";
       } else {
         infoText.innerText = "Chờ phiên quét";
@@ -92,14 +95,19 @@
       }
     });
 
+    async function startCameraManual() {
+      startOverlay.classList.add('hidden');
+      await getDevicesAndInit();
+    }
+
     async function getDevicesAndInit() {
       try {
-        // Xin quyền cơ bản trước để trình duyệt cho phép đọc danh sách Camera
-        const initialStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        initialStream.getTracks().forEach(track => track.stop());
+        // Gọi luồng video tối giản để lấy quyền truy cập thiết bị mà không bị lỗi facingMode
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        tempStream.getTracks().forEach(t => t.stop());
 
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
 
         cameraSelect.innerHTML = '';
         if (videoDevices.length === 0) {
@@ -108,46 +116,50 @@
         }
 
         videoDevices.forEach((device, index) => {
-          const option = document.createElement('option');
-          option.value = device.deviceId;
-          option.text = device.label || `Camera ${index + 1}`;
-          cameraSelect.appendChild(option);
+          const opt = document.createElement('option');
+          opt.value = device.deviceId;
+          opt.text = device.label || `Camera ${index + 1}`;
+          cameraSelect.appendChild(opt);
         });
 
-        // Tự chọn camera cuối cùng (thường là Camera sau chính trên Android)
-        cameraSelect.selectedIndex = videoDevices.length - 1;
-        startSelectedCamera();
+        // Ưu tiên tự chọn camera sau (nếu tên thiết bị có chứa back/rear/environment)
+        let selectedIndex = videoDevices.findIndex(d => {
+          const lbl = (d.label || '').toLowerCase();
+          return lbl.includes('back') || lbl.includes('rear') || lbl.includes('environment') || lbl.includes('sau');
+        });
 
+        if (selectedIndex === -1) selectedIndex = 0;
+        cameraSelect.selectedIndex = selectedIndex;
+
+        await startSelectedCamera();
       } catch (err) {
-        document.getElementById('error-box').classList.remove('hidden');
-        document.getElementById('error-msg').innerText = "Edge từ chối cấp quyền: " + err.message;
+        alert("Lỗi cấp quyền hoặc kết nối Camera: " + err.message);
       }
     }
 
     async function startSelectedCamera() {
       const deviceId = cameraSelect.value;
-      if (!deviceId) return;
-
       if (currentStream) {
-        currentStream.getTracks().forEach(track => track.stop());
+        currentStream.getTracks().forEach(t => t.stop());
       }
 
-      document.getElementById('error-box').classList.add('hidden');
       camStatus.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-ping inline-block";
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: deviceId } }
-        });
+        // Truy vấn chính xác theo deviceId thay vì dùng tham số facingMode gây lỗi
+        const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: true };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
         currentStream = stream;
         video.srcObject = stream;
         await video.play();
+
+        startOverlay.classList.add('hidden');
         camStatus.className = "w-2.5 h-2.5 rounded-full bg-green-500 inline-block";
         requestAnimationFrame(tick);
       } catch (err) {
         camStatus.className = "w-2.5 h-2.5 rounded-full bg-red-500 inline-block";
-        document.getElementById('error-box').classList.remove('hidden');
-        document.getElementById('error-msg').innerText = "Không thể bật camera này, hãy thử chọn camera khác trong danh sách!";
+        alert("Không mở được camera này: " + err.message + ". Bạn hãy chọn camera khác trong danh sách ở trên!");
       }
     }
 
@@ -192,7 +204,11 @@
       });
     }
 
-    window.addEventListener('load', getDevicesAndInit);
+    window.addEventListener('load', () => {
+      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        getDevicesAndInit();
+      }
+    });
   </script>
 </body>
 </html>
