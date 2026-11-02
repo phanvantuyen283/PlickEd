@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PlickEd - Scanner Fix FacingMode</title>
+  <title>PlickEd - Scanner Fix Initialization</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -31,7 +31,7 @@
         <option value="">-- Đang tìm Camera --</option>
       </select>
       <button onclick="startCameraManual()" class="bg-green-600 hover:bg-green-700 text-xs px-3 py-2 rounded-lg font-bold text-white shadow">
-        🔄 Thử lại
+        🔄 Bật lại
       </button>
     </div>
   </div>
@@ -50,7 +50,7 @@
     <div id="start-overlay" class="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center z-20 space-y-4">
       <div class="w-16 h-16 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center text-3xl">📷</div>
       <h2 class="text-lg font-bold text-white">Sẵn Sàng Quét Thẻ</h2>
-      <p class="text-xs text-slate-400 max-w-xs">Nhấn nút bên dưới để bắt đầu kết nối camera thiết bị.</p>
+      <p class="text-xs text-slate-400 max-w-xs">Nhấn nút bên dưới để kết nối camera thiết bị.</p>
       <button onclick="startCameraManual()" class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-6 py-3 rounded-xl shadow-lg transition-all active:scale-95">
         🚀 BẬT CAMERA QUÉT
       </button>
@@ -67,6 +67,12 @@
   </div>
 
   <script>
+    // Khởi tạo các biến toàn cục ở phạm vi window để tránh hoàn toàn lỗi TDZ
+    window.currentStream = null;
+    window.activeSession = null;
+    window.scannedList = {};
+    window.detector = null;
+
     const firebaseConfig = { databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
@@ -79,14 +85,9 @@
     const infoText = document.getElementById('info-text');
     const startOverlay = document.getElementById('start-overlay');
 
-    let detector = new AR.Detector();
-    let currentStream = null;
-    let activeSession = null;
-    let scannedList = {};
-
     db.ref('activeSession').on('value', (snapshot) => {
-      activeSession = snapshot.val();
-      if (activeSession && activeSession.status === 'scanning') {
+      window.activeSession = snapshot.val();
+      if (window.activeSession && window.activeSession.status === 'scanning') {
         infoText.innerText = "Đang quét...";
         infoText.className = "text-xs text-green-400 font-semibold";
       } else {
@@ -96,13 +97,17 @@
     });
 
     async function startCameraManual() {
-      startOverlay.classList.add('hidden');
+      if (startOverlay) startOverlay.classList.add('hidden');
       await getDevicesAndInit();
     }
 
     async function getDevicesAndInit() {
       try {
-        // Gọi luồng video tối giản để lấy quyền truy cập thiết bị mà không bị lỗi facingMode
+        if (!window.detector && typeof AR !== 'undefined') {
+          window.detector = new AR.Detector();
+        }
+
+        // Cấp quyền cơ bản
         const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
         tempStream.getTracks().forEach(t => t.stop());
 
@@ -122,7 +127,6 @@
           cameraSelect.appendChild(opt);
         });
 
-        // Ưu tiên tự chọn camera sau (nếu tên thiết bị có chứa back/rear/environment)
         let selectedIndex = videoDevices.findIndex(d => {
           const lbl = (d.label || '').toLowerCase();
           return lbl.includes('back') || lbl.includes('rear') || lbl.includes('environment') || lbl.includes('sau');
@@ -139,27 +143,29 @@
 
     async function startSelectedCamera() {
       const deviceId = cameraSelect.value;
-      if (currentStream) {
-        currentStream.getTracks().forEach(t => t.stop());
+
+      // Dùng window.currentStream quản lý luồng video
+      if (window.currentStream) {
+        window.currentStream.getTracks().forEach(t => t.stop());
+        window.currentStream = null;
       }
 
       camStatus.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-ping inline-block";
 
       try {
-        // Truy vấn chính xác theo deviceId thay vì dùng tham số facingMode gây lỗi
         const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: true };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-        currentStream = stream;
+        window.currentStream = stream;
         video.srcObject = stream;
         await video.play();
 
-        startOverlay.classList.add('hidden');
+        if (startOverlay) startOverlay.classList.add('hidden');
         camStatus.className = "w-2.5 h-2.5 rounded-full bg-green-500 inline-block";
         requestAnimationFrame(tick);
       } catch (err) {
         camStatus.className = "w-2.5 h-2.5 rounded-full bg-red-500 inline-block";
-        alert("Không mở được camera này: " + err.message + ". Bạn hãy chọn camera khác trong danh sách ở trên!");
+        alert("Không mở được camera này: " + err.message + ". Bạn hãy chọn camera khác trong danh sách!");
       }
     }
 
@@ -170,17 +176,18 @@
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const markers = detector.detect(imageData);
-
-        if (markers && markers.length > 0) {
-          processMarkers(markers);
+        if (window.detector) {
+          const markers = window.detector.detect(imageData);
+          if (markers && markers.length > 0) {
+            processMarkers(markers);
+          }
         }
       }
       requestAnimationFrame(tick);
     }
 
     function processMarkers(markers) {
-      if (!activeSession || activeSession.status !== 'scanning') return;
+      if (!window.activeSession || window.activeSession.status !== 'scanning') return;
 
       markers.forEach(marker => {
         const id = marker.id;
@@ -198,8 +205,8 @@
 
         db.ref(`activeSession/responses/${id}`).set(answer);
 
-        scannedList[id] = answer;
-        document.getElementById('scanned-count').innerText = Object.keys(scannedList).length;
+        window.scannedList[id] = answer;
+        document.getElementById('scanned-count').innerText = Object.keys(window.scannedList).length;
         document.getElementById('last-scan').innerText = `Học sinh STT ${id}: Đáp án ${answer}`;
       });
     }
