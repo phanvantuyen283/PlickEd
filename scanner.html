@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PlickEd - Scanner Fix Initialization</title>
+  <title>PlickEd - Scanner Tablet Fix Cam 0</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -22,16 +22,16 @@
         <span>PlickEd Scanner</span>
         <span id="cam-status" class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
       </h1>
-      <span id="info-text" class="text-xs text-slate-300">Đang khởi tạo...</span>
+      <span id="info-text" class="text-xs text-slate-300">Đang kiểm tra Camera...</span>
     </div>
 
-    <!-- Dropdown Chọn Camera -->
+    <!-- Dropdown Chọn Camera & Nút Chuyển Nhanh -->
     <div class="flex gap-2">
-      <select id="camera-select" onchange="startSelectedCamera()" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none">
-        <option value="">-- Đang tìm Camera --</option>
+      <select id="camera-select" onchange="switchSelectedCamera()" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none">
+        <option value="">-- Đang liệt kê Camera --</option>
       </select>
-      <button onclick="startCameraManual()" class="bg-green-600 hover:bg-green-700 text-xs px-3 py-2 rounded-lg font-bold text-white shadow">
-        🔄 Bật lại
+      <button onclick="cycleNextCamera()" class="bg-blue-600 hover:bg-blue-500 text-xs px-3 py-2 rounded-lg font-bold text-white shadow flex items-center gap-1">
+        🔄 Đổi Ống Kính
       </button>
     </div>
   </div>
@@ -39,21 +39,24 @@
   <!-- Camera Viewport Area -->
   <div class="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
     <video id="webcam" autoplay playsinline muted webkit-playsinline class="w-full h-full object-cover"></video>
-    <canvas id="canvas" class="hidden"></canvas>
+    <canvas id="canvas" class="absolute inset-0 w-full h-full object-cover pointer-events-none"></canvas>
 
-    <!-- Overlay HUD Grid -->
-    <div class="absolute inset-0 border-2 border-green-500/30 pointer-events-none flex items-center justify-center">
-      <div class="w-72 h-72 border-2 border-dashed border-green-400/60 rounded-3xl animate-pulse"></div>
-    </div>
-
-    <!-- Overlay Nút Bật Camera Thủ Công -->
-    <div id="start-overlay" class="absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center p-6 text-center z-20 space-y-4">
-      <div class="w-16 h-16 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center text-3xl">📷</div>
-      <h2 class="text-lg font-bold text-white">Sẵn Sàng Quét Thẻ</h2>
-      <p class="text-xs text-slate-400 max-w-xs">Nhấn nút bên dưới để kết nối camera thiết bị.</p>
-      <button onclick="startCameraManual()" class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-6 py-3 rounded-xl shadow-lg transition-all active:scale-95">
+    <!-- Overlay Nút Bật Camera -->
+    <div id="start-overlay" class="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-6 text-center z-20 space-y-4">
+      <div class="w-20 h-20 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center text-4xl animate-pulse">📷</div>
+      <h2 class="text-xl font-black text-white">Kết Nối Camera Máy Tính Bảng</h2>
+      <p class="text-xs text-slate-300 max-w-xs leading-relaxed">
+        Nhấn nút bên dưới để khởi động camera quét thẻ.
+      </p>
+      <button onclick="startTabletCamera()" class="bg-green-600 hover:bg-green-500 text-white font-black text-base px-8 py-3.5 rounded-2xl shadow-xl transition-all transform active:scale-95">
         🚀 BẬT CAMERA QUÉT
       </button>
+    </div>
+
+    <!-- Thanh Thông Số Debug Trực Tiếp trên màn hình -->
+    <div class="absolute top-2 left-2 bg-slate-900/80 backdrop-blur px-2.5 py-1.5 rounded-lg text-[10px] text-slate-300 border border-slate-700 pointer-events-none z-10">
+      <div>Độ phân giải: <span id="res-debug" class="text-green-400 font-bold">0x0</span></div>
+      <div>Ống kính: <span id="cam-name-debug" class="text-yellow-400 font-bold">Chưa chọn</span></div>
     </div>
   </div>
 
@@ -63,15 +66,15 @@
       <span class="text-slate-400">Đã quét:</span>
       <span id="scanned-count" class="font-extrabold text-green-400 text-sm">0</span>
     </div>
-    <span id="last-scan" class="text-slate-400 truncate max-w-[220px]">Chưa nhận diện</span>
+    <span id="last-scan" class="text-slate-400 truncate max-w-[220px]">Chưa nhận diện thẻ</span>
   </div>
 
   <script>
-    // Khởi tạo các biến toàn cục ở phạm vi window để tránh hoàn toàn lỗi TDZ
     window.currentStream = null;
     window.activeSession = null;
-    window.scannedList = {};
     window.detector = null;
+    window.videoDevices = [];
+    window.currentCamIndex = 0;
 
     const firebaseConfig = { databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" };
     firebase.initializeApp(firebaseConfig);
@@ -84,115 +87,187 @@
     const camStatus = document.getElementById('cam-status');
     const infoText = document.getElementById('info-text');
     const startOverlay = document.getElementById('start-overlay');
+    const resDebug = document.getElementById('res-debug');
+    const camNameDebug = document.getElementById('cam-name-debug');
 
     db.ref('activeSession').on('value', (snapshot) => {
       window.activeSession = snapshot.val();
       if (window.activeSession && window.activeSession.status === 'scanning') {
-        infoText.innerText = "Đang quét...";
+        infoText.innerText = "Phiên quét ĐANG MỞ";
         infoText.className = "text-xs text-green-400 font-semibold";
       } else {
-        infoText.innerText = "Chờ phiên quét";
+        infoText.innerText = "⚠️ Nhìn thấy thẻ nhưng Admin chưa mở quét";
         infoText.className = "text-xs text-yellow-400 font-semibold";
       }
     });
 
-    async function startCameraManual() {
-      if (startOverlay) startOverlay.classList.add('hidden');
-      await getDevicesAndInit();
+    async function startTabletCamera() {
+      camStatus.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-ping inline-block";
+
+      if (window.currentStream) {
+        window.currentStream.getTracks().forEach(t => t.stop());
+        window.currentStream = null;
+      }
+
+      if (!window.detector && typeof AR !== 'undefined') {
+        window.detector = new AR.Detector();
+      }
+
+      try {
+        // Xin luồng video cơ bản trước
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        window.currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+
+        startOverlay.classList.add('hidden');
+        camStatus.className = "w-2.5 h-2.5 rounded-full bg-green-500 inline-block";
+
+        // Tải danh sách thiết bị camera
+        await populateCameraList();
+        requestAnimationFrame(tick);
+      } catch (err) {
+        camStatus.className = "w-2.5 h-2.5 rounded-full bg-red-500 inline-block";
+        alert("Không thể bật Camera: " + err.message);
+      }
     }
 
-    async function getDevicesAndInit() {
+    async function populateCameraList() {
       try {
-        if (!window.detector && typeof AR !== 'undefined') {
-          window.detector = new AR.Detector();
-        }
-
-        // Cấp quyền cơ bản
-        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        tempStream.getTracks().forEach(t => t.stop());
-
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        window.videoDevices = devices.filter(d => d.kind === 'videoinput');
 
         cameraSelect.innerHTML = '';
-        if (videoDevices.length === 0) {
-          cameraSelect.innerHTML = '<option value="">Không tìm thấy Camera nào</option>';
+        if (window.videoDevices.length === 0) {
+          cameraSelect.innerHTML = '<option value="">Không tìm thấy Camera</option>';
           return;
         }
 
-        videoDevices.forEach((device, index) => {
+        window.videoDevices.forEach((device, index) => {
           const opt = document.createElement('option');
           opt.value = device.deviceId;
           opt.text = device.label || `Camera ${index + 1}`;
           cameraSelect.appendChild(opt);
         });
 
-        let selectedIndex = videoDevices.findIndex(d => {
+        // Tìm ưu tiên camera sau (back/rear/environment)
+        let backCamIndex = window.videoDevices.findIndex(d => {
           const lbl = (d.label || '').toLowerCase();
           return lbl.includes('back') || lbl.includes('rear') || lbl.includes('environment') || lbl.includes('sau');
         });
 
-        if (selectedIndex === -1) selectedIndex = 0;
-        cameraSelect.selectedIndex = selectedIndex;
+        // Nếu không ghi tên, mặc định chọn camera cuối cùng (thường là camera sau trên Android)
+        if (backCamIndex === -1 && window.videoDevices.length > 1) {
+          backCamIndex = window.videoDevices.length - 1;
+        } else if (backCamIndex === -1) {
+          backCamIndex = 0;
+        }
 
-        await startSelectedCamera();
-      } catch (err) {
-        alert("Lỗi cấp quyền hoặc kết nối Camera: " + err.message);
+        window.currentCamIndex = backCamIndex;
+        cameraSelect.selectedIndex = backCamIndex;
+
+        // Chuyển sang camera sau chuẩn
+        if (window.videoDevices.length > 1) {
+          await switchCameraByIndex(backCamIndex);
+        }
+      } catch (e) {
+        console.warn(e);
       }
     }
 
-    async function startSelectedCamera() {
-      const deviceId = cameraSelect.value;
+    async function cycleNextCamera() {
+      if (!window.videoDevices || window.videoDevices.length === 0) return;
+      window.currentCamIndex = (window.currentCamIndex + 1) % window.videoDevices.length;
+      cameraSelect.selectedIndex = window.currentCamIndex;
+      await switchCameraByIndex(window.currentCamIndex);
+    }
 
-      // Dùng window.currentStream quản lý luồng video
+    async function switchSelectedCamera() {
+      const idx = cameraSelect.selectedIndex;
+      if (idx !== -1) {
+        window.currentCamIndex = idx;
+        await switchCameraByIndex(idx);
+      }
+    }
+
+    async function switchCameraByIndex(index) {
+      const device = window.videoDevices[index];
+      if (!device) return;
+
       if (window.currentStream) {
         window.currentStream.getTracks().forEach(t => t.stop());
-        window.currentStream = null;
       }
 
-      camStatus.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-ping inline-block";
+      camNameDebug.innerText = device.label || `Camera ${index + 1}`;
 
       try {
-        const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: true };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: device.deviceId } }
+        });
         window.currentStream = stream;
         video.srcObject = stream;
         await video.play();
-
-        if (startOverlay) startOverlay.classList.add('hidden');
-        camStatus.className = "w-2.5 h-2.5 rounded-full bg-green-500 inline-block";
-        requestAnimationFrame(tick);
       } catch (err) {
-        camStatus.className = "w-2.5 h-2.5 rounded-full bg-red-500 inline-block";
-        alert("Không mở được camera này: " + err.message + ". Bạn hãy chọn camera khác trong danh sách!");
+        // Fallback nếu exact deviceId bị từ chối
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: device.deviceId }
+          });
+          window.currentStream = fallbackStream;
+          video.srcObject = fallbackStream;
+          await video.play();
+        } catch (e) {
+          alert("Không thể chuyển sang ống kính này: " + e.message);
+        }
       }
     }
 
     function tick() {
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && video.videoHeight > 0) {
+        // Cập nhật thông số độ phân giải lên màn hình
+        resDebug.innerText = `${video.videoWidth}x${video.videoHeight}`;
+
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // Chụp ảnh khung hình
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
         if (window.detector) {
           const markers = window.detector.detect(imageData);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
           if (markers && markers.length > 0) {
-            processMarkers(markers);
+            drawMarkersAndProcess(markers);
           }
         }
       }
       requestAnimationFrame(tick);
     }
 
-    function processMarkers(markers) {
-      if (!window.activeSession || window.activeSession.status !== 'scanning') return;
-
+    function drawMarkersAndProcess(markers) {
       markers.forEach(marker => {
-        const id = marker.id;
         const corners = marker.corners;
+        const id = marker.id;
 
+        // Vẽ khung viền xanh quanh thẻ ArUco
+        ctx.beginPath();
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = 5;
+        ctx.moveTo(corners[0].x, corners[0].y);
+        for (let i = 1; i < corners.length; i++) {
+          ctx.lineTo(corners[i].x, corners[i].y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.fillStyle = "#22c55e";
+        ctx.font = "bold 24px sans-serif";
+        ctx.fillText(`ID: ${id}`, corners[0].x, corners[0].y - 12);
+
+        // Tính góc xoay thẻ
         const dx = corners[1].x - corners[0].x;
         const dy = corners[1].y - corners[0].y;
         let angle = Math.atan2(dy, dx) * (180 / Math.PI);
@@ -203,18 +278,17 @@
         else if (angle >= -135 && angle < -45) answer = "D";
         else answer = "C";
 
-        db.ref(`activeSession/responses/${id}`).set(answer);
-
-        window.scannedList[id] = answer;
-        document.getElementById('scanned-count').innerText = Object.keys(window.scannedList).length;
-        document.getElementById('last-scan').innerText = `Học sinh STT ${id}: Đáp án ${answer}`;
+        if (window.activeSession && window.activeSession.status === 'scanning') {
+          db.ref(`activeSession/responses/${id}`).set(answer);
+          document.getElementById('last-scan').innerText = `✅ Nhận thẻ STT ${id}: Đáp án ${answer}`;
+        } else {
+          document.getElementById('last-scan').innerText = `👀 Phát hiện thẻ ID ${id} (Đáp án ${answer})`;
+        }
       });
     }
 
     window.addEventListener('load', () => {
-      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-        getDevicesAndInit();
-      }
+      // Tự động kiểm tra khi tải
     });
   </script>
 </body>
