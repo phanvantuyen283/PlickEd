@@ -3,40 +3,65 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PlickEd - Quét Mã</title>
+  <title>PlickEd - Scanner Fix Edge</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <!-- jsaruco Library -->
   <script src="https://cdn.jsdelivr.net/gh/jsviz/jsaruco/src/cv.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/jsviz/jsaruco/src/aruco.js"></script>
-<link rel="manifest" href="manifest-scanner.json"><script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js");}</script>
+  <link rel="manifest" href="manifest-scanner.json">
+  <script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js");}</script>
 </head>
-<body class="bg-black text-white h-screen flex flex-col justify-between font-sans overflow-hidden">
-  <div class="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center z-10">
-    <div>
-      <h1 class="text-lg font-bold text-blue-400">PlickEd Quét Mã</h1>
-      <p id="scan-feedback" class="text-xs text-slate-400">Sẵn sàng quét...</p>
+<body class="bg-black text-white min-h-screen flex flex-col justify-between font-sans overflow-hidden">
+
+  <!-- Header Section & Camera Select -->
+  <div class="p-3 bg-slate-900 border-b border-slate-800 flex flex-col gap-2 z-10">
+    <div class="flex justify-between items-center">
+      <h1 class="text-base font-black text-green-400 flex items-center gap-1.5">
+        <span>PlickEd Scanner</span>
+        <span id="cam-status" class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
+      </h1>
+      <span id="info-text" class="text-xs text-slate-300">Đang tìm Camera...</span>
     </div>
-    <div id="scanned-count-badge" class="bg-blue-600 px-3 py-1 rounded-full text-sm font-bold">
-      Đã nhận: <span id="scanned-count">0</span>
+
+    <!-- Dropdown Chọn Đích Danh Camera phần cứng -->
+    <div class="flex gap-2">
+      <select id="camera-select" onchange="startSelectedCamera()" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-white focus:outline-none">
+        <option value="">-- Đang tìm danh sách Camera --</option>
+      </select>
+      <button onclick="getDevicesAndInit()" class="bg-blue-600 hover:bg-blue-700 text-xs px-3 py-2 rounded-lg font-bold">
+        🔄 Tìm lại
+      </button>
     </div>
   </div>
 
+  <!-- Camera Viewport Area -->
   <div class="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
-    <video id="webcam" autoplay playsinline class="w-full h-full object-cover"></video>
+    <video id="webcam" autoplay playsinline muted class="w-full h-full object-cover"></video>
     <canvas id="canvas" class="hidden"></canvas>
-    <div id="scan-overlay" class="absolute inset-0 border-4 border-dashed border-blue-500/30 pointer-events-none flex items-center justify-center">
-      <p class="text-xs text-slate-500 bg-black/50 px-2 py-1 rounded">Hướng camera về phía thẻ học sinh</p>
+
+    <!-- Overlay HUD Grid -->
+    <div class="absolute inset-0 border-2 border-green-500/30 pointer-events-none flex items-center justify-center">
+      <div class="w-64 h-64 border-2 border-dashed border-green-400/60 rounded-3xl animate-pulse"></div>
+    </div>
+
+    <!-- Error/Help Box -->
+    <div id="error-box" class="hidden absolute inset-4 bg-slate-900/95 rounded-2xl p-6 flex flex-col items-center justify-center text-center z-20 space-y-3">
+      <span class="text-4xl">⚠️</span>
+      <h3 class="text-base font-bold text-red-400">Không mở được luồng Video</h3>
+      <p id="error-msg" class="text-xs text-slate-300">Hãy chọn một Camera khác trong danh sách ở trên đỉnh màn hình.</p>
     </div>
   </div>
 
-  <div class="p-4 bg-slate-900 border-t border-slate-800 grid grid-cols-2 gap-3 z-10">
-    <button id="btn-toggle-scan" onclick="toggleScan()" class="bg-green-600 active:bg-green-700 py-3 rounded-xl font-bold text-center text-lg shadow-lg">
-      Bắt đầu quét
-    </button>
-    <button id="btn-reset" onclick="resetSession()" class="bg-red-600/80 active:bg-red-700 py-3 rounded-xl font-bold text-center text-lg text-slate-200">
-      Xóa câu này
-    </button>
+  <!-- Footer Info Bar -->
+  <div class="p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center text-xs z-10">
+    <div class="flex items-center space-x-2">
+      <span class="text-slate-400">Đã quét:</span>
+      <span id="scanned-count" class="font-extrabold text-green-400 text-sm">0</span>
+    </div>
+    <span id="last-scan" class="text-slate-400 truncate max-w-[200px]">Chưa nhận diện</span>
   </div>
 
   <script>
@@ -47,73 +72,127 @@
     const video = document.getElementById('webcam');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    let isScanning = false, scanInterval = null, detector = new AR.Detector(), localResponses = {};
+    const cameraSelect = document.getElementById('camera-select');
+    const camStatus = document.getElementById('cam-status');
+    const infoText = document.getElementById('info-text');
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then(stream => { video.srcObject = stream; })
-      .catch(err => alert("Không thể mở Camera. Vui lòng cấp quyền!"));
+    let detector = new AR.Detector();
+    let currentStream = null;
+    let activeSession = null;
+    let scannedList = {};
 
-    function toggleScan() {
-      isScanning = !isScanning;
-      const btn = document.getElementById('btn-toggle-scan');
-      if (isScanning) {
-        btn.innerText = "Tạm dừng";
-        btn.className = "bg-yellow-600 active:bg-yellow-700 py-3 rounded-xl font-bold text-center text-lg shadow-lg";
-        db.ref('activeSession/status').set('scanning');
-        scanInterval = setInterval(processFrame, 250);
+    db.ref('activeSession').on('value', (snapshot) => {
+      activeSession = snapshot.val();
+      if (activeSession && activeSession.status === 'scanning') {
+        infoText.innerText = "Đang nhận dạng...";
+        infoText.className = "text-xs text-green-400 font-semibold";
       } else {
-        btn.innerText = "Bắt đầu quét";
-        btn.className = "bg-green-600 active:bg-green-700 py-3 rounded-xl font-bold text-center text-lg shadow-lg";
-        db.ref('activeSession/status').set('locked');
-        clearInterval(scanInterval);
+        infoText.innerText = "Chờ phiên quét";
+        infoText.className = "text-xs text-yellow-400 font-semibold";
+      }
+    });
+
+    async function getDevicesAndInit() {
+      try {
+        // Xin quyền cơ bản trước để trình duyệt cho phép đọc danh sách Camera
+        const initialStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        initialStream.getTracks().forEach(track => track.stop());
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+        cameraSelect.innerHTML = '';
+        if (videoDevices.length === 0) {
+          cameraSelect.innerHTML = '<option value="">Không tìm thấy Camera nào</option>';
+          return;
+        }
+
+        videoDevices.forEach((device, index) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.text = device.label || `Camera ${index + 1}`;
+          cameraSelect.appendChild(option);
+        });
+
+        // Tự chọn camera cuối cùng (thường là Camera sau chính trên Android)
+        cameraSelect.selectedIndex = videoDevices.length - 1;
+        startSelectedCamera();
+
+      } catch (err) {
+        document.getElementById('error-box').classList.remove('hidden');
+        document.getElementById('error-msg').innerText = "Edge từ chối cấp quyền: " + err.message;
       }
     }
 
-    function processFrame() {
-      if (!video.videoWidth) return;
-      canvas.width = 640;
-      canvas.height = (video.videoHeight / video.videoWidth) * 640;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const markers = detector.detect(imageData);
+    async function startSelectedCamera() {
+      const deviceId = cameraSelect.value;
+      if (!deviceId) return;
 
-      if (markers.length > 0) {
-        let newDetected = 0;
-        markers.forEach(marker => {
-          const studentId = marker.id;
-          const answer = getAnswerFromCorners(marker.corners);
-          if (!localResponses[studentId] || localResponses[studentId] !== answer) {
-            localResponses[studentId] = answer;
-            db.ref(`activeSession/responses/${studentId}`).set(answer);
-            newDetected++;
-          }
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+
+      document.getElementById('error-box').classList.add('hidden');
+      camStatus.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-ping inline-block";
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId } }
         });
-        if (newDetected > 0) {
-          document.getElementById('scan-feedback').innerText = `Vừa phát hiện ${newDetected} thẻ mới!`;
-          document.getElementById('scanned-count').innerText = Object.keys(localResponses).length;
+        currentStream = stream;
+        video.srcObject = stream;
+        await video.play();
+        camStatus.className = "w-2.5 h-2.5 rounded-full bg-green-500 inline-block";
+        requestAnimationFrame(tick);
+      } catch (err) {
+        camStatus.className = "w-2.5 h-2.5 rounded-full bg-red-500 inline-block";
+        document.getElementById('error-box').classList.remove('hidden');
+        document.getElementById('error-msg').innerText = "Không thể bật camera này, hãy thử chọn camera khác trong danh sách!";
+      }
+    }
+
+    function tick() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const markers = detector.detect(imageData);
+
+        if (markers && markers.length > 0) {
+          processMarkers(markers);
         }
       }
+      requestAnimationFrame(tick);
     }
 
-    function getAnswerFromCorners(corners) {
-      const dx = corners[1].x - corners[0].x;
-      const dy = corners[1].y - corners[0].y;
-      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-      if (angle >= -45 && angle < 45) return 'A';
-      if (angle >= 45 && angle < 135) return 'B';
-      if (angle >= -135 && angle < -45) return 'D';
-      return 'C';
+    function processMarkers(markers) {
+      if (!activeSession || activeSession.status !== 'scanning') return;
+
+      markers.forEach(marker => {
+        const id = marker.id;
+        const corners = marker.corners;
+
+        const dx = corners[1].x - corners[0].x;
+        const dy = corners[1].y - corners[0].y;
+        let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+        let answer = "A";
+        if (angle >= -45 && angle < 45) answer = "A";
+        else if (angle >= 45 && angle < 135) answer = "B";
+        else if (angle >= -135 && angle < -45) answer = "D";
+        else answer = "C";
+
+        db.ref(`activeSession/responses/${id}`).set(answer);
+
+        scannedList[id] = answer;
+        document.getElementById('scanned-count').innerText = Object.keys(scannedList).length;
+        document.getElementById('last-scan').innerText = `Học sinh STT ${id}: Đáp án ${answer}`;
+      });
     }
 
-    function resetSession() {
-      if (confirm("Xóa toàn bộ đáp án của câu hỏi hiện tại?")) {
-        localResponses = {};
-        document.getElementById('scanned-count').innerText = "0";
-        db.ref('activeSession/responses').remove();
-      }
-    }
+    window.addEventListener('load', getDevicesAndInit);
   </script>
 </body>
 </html>
-
