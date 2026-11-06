@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PlickEd - Diagnostic Scanner Fix</title>
+  <title>PlickEd - Diagnostic Scanner (Local Lib)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-  <!-- Dùng js-aruco2 ổn định qua CDN chính thức, hỗ trợ cả ARUCO_MIP_36h12 và ARUCO chuẩn OpenCV -->
-  <script src="https://cdn.jsdelivr.net/npm/js-aruco2@1.0.3/src/cv.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/js-aruco2@1.0.3/src/aruco.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/js-aruco2@1.0.3/src/dictionaries/aruco_mip_36h12.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/js-aruco2@1.0.3/src/dictionaries/aruco_4x4_1000.js"></script>
+  <!-- Nạp trực tiếp từ thư mục lib nội bộ trên cùng repo GitHub -->
+  <script src="./lib/cv.js"></script>
+  <script src="./lib/aruco.js"></script>
+  <script src="./lib/aruco_mip_36h12.js"></script>
+  <script src="./lib/aruco_4x4_1000.js"></script>
   <style>
     #debug-console::-webkit-scrollbar { width: 4px; }
     #debug-console::-webkit-scrollbar-thumb { background: #4b5563; }
@@ -48,7 +48,7 @@
     <video id="webcam" autoplay playsinline muted webkit-playsinline class="w-full h-full object-contain"></video>
     <canvas id="overlay-canvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none"></canvas>
 
-    <!-- PiP: Hiển thị chính xác ảnh nhị phân bên trong lõi AR.Detector -->
+    <!-- PiP Threshold -->
     <div class="absolute top-2 right-2 w-36 h-28 bg-black border-2 border-red-500 rounded flex flex-col items-center z-10 pointer-events-none shadow-2xl">
       <span class="text-[9px] text-white bg-red-600 w-full text-center uppercase tracking-wider font-bold">Lõi AI Threshold</span>
       <canvas id="threshold-canvas" class="w-full h-full object-contain"></canvas>
@@ -59,15 +59,15 @@
       <button onclick="toggleTestCard()" class="bg-amber-600/90 hover:bg-amber-500 px-3 py-2.5 rounded-full text-xs text-white font-bold backdrop-blur shadow-lg">
         🪪 Mở Thẻ Mẫu Test
       </button>
-      <button onclick="cycleCamera()" class="bg-blue-600/90 hover:bg-blue-500 px-4 py-2.5 rounded-full text-xs text-white font-bold backdrop-blur shadow-lg">
+      <button id="btn-switch-cam" onclick="cycleCamera()" class="bg-blue-600/90 hover:bg-blue-500 px-4 py-2.5 rounded-full text-xs text-white font-bold backdrop-blur shadow-lg">
         🔄 Đổi Cam (<span id="cam-index-lbl">Auto</span>)
       </button>
     </div>
 
-    <!-- Popup Thẻ Mẫu để kiểm tra chéo (mở trên máy khác để quét) -->
+    <!-- Popup Thẻ Mẫu -->
     <div id="test-card-modal" class="hidden absolute inset-0 bg-black/90 z-30 flex flex-col items-center justify-center p-4">
       <div class="bg-white p-6 rounded-xl flex flex-col items-center shadow-2xl">
-        <p class="text-black font-bold text-sm mb-2">Thẻ chuẩn ID #1 (Chụp hoặc mở trên ĐT khác để quét)</p>
+        <p class="text-black font-bold text-sm mb-2">Thẻ chuẩn ID #1 (Mở trên thiết bị khác để quét)</p>
         <div id="sample-marker-svg" class="w-56 h-56 flex items-center justify-center border border-slate-300 p-3 bg-white"></div>
         <button onclick="toggleTestCard()" class="mt-4 bg-red-600 text-white px-6 py-2 rounded-full font-bold text-sm">Đóng lại</button>
       </div>
@@ -76,7 +76,7 @@
     <!-- Màn chắn Bắt đầu -->
     <div id="start-overlay" class="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-6 text-center z-40 backdrop-blur-sm">
       <h2 class="text-2xl font-bold text-white mb-2">Chẩn Đoán Nhận Diện Mã</h2>
-      <p class="text-slate-400 text-sm mb-6 max-w-xs">Đã vá lỗi CDN chết, chuẩn hóa khung hình 640p chống rỗng nét và hỗ trợ đa từ điển ArUco.</p>
+      <p id="lib-check-msg" class="text-slate-400 text-sm mb-6 max-w-xs">Đang kiểm tra thư viện nội bộ...</p>
       <button onclick="initInspection()" class="bg-green-600 hover:bg-green-500 text-white font-bold text-lg px-8 py-4 rounded-full shadow-lg shadow-green-500/20">
         Bắt Đầu Quét
       </button>
@@ -111,45 +111,72 @@
 
     window.addEventListener('error', e => logToScreen(`JS Error: ${e.message}`, 'error'));
 
+    // Kiểm tra ngay lúc mở trang xem ./lib/cv.js và ./lib/aruco.js đã nạp thành công chưa
+    window.addEventListener('DOMContentLoaded', () => {
+      const msgEl = document.getElementById('lib-check-msg');
+      if (typeof CV !== 'undefined' && typeof AR !== 'undefined') {
+        const dicts = Object.keys(AR.DICTIONARIES || {}).join(', ');
+        msgEl.innerHTML = `<span class="text-green-400 font-bold">✓ Thư viện AI cục bộ đã sẵn sàng!</span><br><span class="text-xs text-slate-400">Từ điển hỗ trợ: ${dicts}</span>`;
+        logToScreen(`Nạp thành công thư viện cục bộ (${dicts})`, 'success');
+      } else {
+        msgEl.innerHTML = `<span class="text-red-400 font-bold">✗ Chưa thấy thư mục ./lib trên server!</span><br><span class="text-xs text-slate-400">Hãy chờ 30 giây để GitHub Pages cập nhật rồi tải lại trang.</span>`;
+        logToScreen('Chưa tìm thấy biến AR/CV từ ./lib/', 'error');
+      }
+    });
+
     const video = document.getElementById('webcam');
     const overlayCanvas = document.getElementById('overlay-canvas');
     const overlayCtx = overlayCanvas.getContext('2d');
     const threshCanvas = document.getElementById('threshold-canvas');
     const threshCtx = threshCanvas.getContext('2d');
 
-    // Canvas ẩn chuyên dùng để chuẩn hóa ảnh về chiều ngang 640px (tối ưu cho adaptiveThreshold của js-aruco)
     const procCanvas = document.createElement('canvas');
     const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
 
     let currentStream = null, detector = null, videoDevices = [], camIndex = -1;
     let rafId = null, frameCount = 0, currentFps = 0, lastTime = performance.now();
     let audioCtx = null, lastBeepTime = 0, currentDict = 'ARUCO_MIP_36h12';
-    let db = null;
+    let isSwitchingCam = false;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
 
     try {
       firebase.initializeApp({ databaseURL: "https://plicked-default-rtdb.asia-southeast1.firebasedatabase.app" });
-      db = firebase.database();
       logToScreen("Firebase sẵn sàng.", "success");
     } catch(e) { logToScreen("Lỗi Firebase: " + e.message, "error"); }
+
+    window.addEventListener('pagehide', releaseCameraHardware);
+    window.addEventListener('beforeunload', releaseCameraHardware);
+
+    async function releaseCameraHardware() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => {
+          try { track.stop(); } catch(e) {}
+        });
+        currentStream = null;
+      }
+      video.pause();
+      video.srcObject = null;
+      await sleep(300);
+    }
 
     function setupDetector(dictName) {
       try {
         if (typeof AR === 'undefined' || !AR.Detector) {
-          logToScreen("LỖI NGHIÊM TRỌNG: Thư viện js-aruco2 chưa tải được!", "error");
+          logToScreen("LỖI: Biến AR chưa tồn tại. Hãy bấm Ctrl+F5 sau khi GitHub Pages build xong!", "error");
           return;
         }
         detector = new AR.Detector({ dictionaryName: dictName });
         currentDict = dictName;
-        logToScreen(`Đã nạp bộ giải mã: ${dictName}`, "success");
+        logToScreen(`Đang dùng bộ giải mã: ${dictName}`, "success");
         renderSampleCard();
       } catch (err) {
-        logToScreen(`Không thể nạp từ điển ${dictName}: ${err.message}`, "error");
+        logToScreen(`Lỗi nạp từ điển ${dictName}: ${err.message}`, "error");
       }
     }
 
-    function changeDictionary(val) {
-      setupDetector(val);
-    }
+    function changeDictionary(val) { setupDetector(val); }
 
     function toggleTestCard() {
       const modal = document.getElementById('test-card-modal');
@@ -158,79 +185,129 @@
     }
 
     function renderSampleCard() {
-      if (!detector || !AR.Dictionary) return;
+      if (typeof AR === 'undefined' || !AR.Dictionary) return;
       try {
         const dict = new AR.Dictionary(currentDict);
-        const svgHtml = dict.generateSVG(1); // Sinh thẻ mẫu ID = 1 đúng chuẩn đang chọn
-        document.getElementById('sample-marker-svg').innerHTML = svgHtml;
+        document.getElementById('sample-marker-svg').innerHTML = dict.generateSVG(1);
         const svgEl = document.querySelector('#sample-marker-svg svg');
         if (svgEl) { svgEl.setAttribute('width', '100%'); svgEl.setAttribute('height', '100%'); }
       } catch (e) {
-        logToScreen("Lỗi tạo thẻ mẫu: " + e.message, "warn");
+        logToScreen("Lỗi vẽ thẻ mẫu: " + e.message, "warn");
       }
     }
 
     async function initInspection() {
       document.getElementById('start-overlay').classList.add('hidden');
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch(e) {}
 
       setupDetector(document.getElementById('dict-select').value);
       await startSelectedStream(true);
     }
 
+    async function acquireStreamWithFallback(targetDeviceId) {
+      const fallbackProfiles = [];
+
+      if (targetDeviceId) {
+        fallbackProfiles.push(
+          { label: "Cam chỉ định (720p)", constraints: { audio: false, video: { deviceId: { exact: targetDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } } },
+          { label: "Cam chỉ định (Gốc)", constraints: { audio: false, video: { deviceId: { exact: targetDeviceId } } } }
+        );
+      } else {
+        fallbackProfiles.push(
+          { label: "Cam sau ưu tiên (720p)", constraints: { audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } } } },
+          { label: "Cam sau cơ bản", constraints: { audio: false, video: { facingMode: "environment" } } }
+        );
+      }
+      fallbackProfiles.push({ label: "Chế độ an toàn (video: true)", constraints: { audio: false, video: true } });
+
+      let lastErr = null;
+      for (const profile of fallbackProfiles) {
+        try {
+          logToScreen(`Thử mở: ${profile.label}...`);
+          return await navigator.mediaDevices.getUserMedia(profile.constraints);
+        } catch (err) {
+          lastErr = err;
+          logToScreen(`Thất bại (${profile.label}): ${err.name}`, "warn");
+          await sleep(350);
+        }
+      }
+      throw lastErr;
+    }
+
     async function startSelectedStream(useDefaultEnv = false) {
-      if (rafId) cancelAnimationFrame(rafId);
-      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+      await releaseCameraHardware();
 
       try {
-        let constraints = {
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        };
-
-        if (!useDefaultEnv && videoDevices.length > 0 && camIndex >= 0) {
-          constraints = {
-            video: {
-              deviceId: { exact: videoDevices[camIndex].deviceId },
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
-            }
-          };
+        let targetId = null;
+        if (!useDefaultEnv && videoDevices.length > 0 && camIndex >= 0 && videoDevices[camIndex]) {
+          targetId = videoDevices[camIndex].deviceId;
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await acquireStreamWithFallback(targetId);
         currentStream = stream;
         video.srcObject = stream;
         await video.play();
 
         const devices = await navigator.mediaDevices.enumerateDevices();
         videoDevices = devices.filter(d => d.kind === 'videoinput');
-        if (useDefaultEnv && videoDevices.length > 0) {
-          const activeId = stream.getVideoTracks()[0].getSettings().deviceId;
-          camIndex = Math.max(0, videoDevices.findIndex(d => d.deviceId === activeId));
-        }
-        document.getElementById('cam-index-lbl').innerText = videoDevices.length ? `${camIndex + 1}/${videoDevices.length}` : '1';
 
-        logToScreen(`Camera hoạt động: ${video.videoWidth}x${video.videoHeight}`, "success");
+        if (videoDevices.length > 0) {
+          const activeTrack = stream.getVideoTracks()[0];
+          const activeId = activeTrack.getSettings ? activeTrack.getSettings().deviceId : null;
+          const foundIdx = videoDevices.findIndex(d => d.deviceId === activeId);
+          if (foundIdx >= 0) camIndex = foundIdx;
+          else if (camIndex < 0) camIndex = 0;
+        }
+
+        document.getElementById('cam-index-lbl').innerText = videoDevices.length ? `${camIndex + 1}/${videoDevices.length}` : '1';
+        logToScreen(`Đã kết nối Camera (${video.videoWidth}x${video.videoHeight})!`, "success");
+
         lastTime = performance.now();
         frameCount = 0;
         rafId = requestAnimationFrame(processFrame);
       } catch (err) {
-        logToScreen(`Lỗi mở Camera: ${err.name} - ${err.message}`, "error");
+        logToScreen(`LỖI PHẦN CỨNG: ${err.name} - ${err.message}`, "error");
       }
     }
 
     async function cycleCamera() {
-      if (videoDevices.length <= 1) {
-        logToScreen("Chỉ tìm thấy 1 camera trên thiết bị này.", "warn");
-        return;
+      if (isSwitchingCam || videoDevices.length <= 1) return;
+      isSwitchingCam = true;
+      const btn = document.getElementById('btn-switch-cam');
+      btn.disabled = true;
+      btn.classList.add('opacity-50');
+
+      try {
+        for (let attempt = 0; attempt < videoDevices.length; attempt++) {
+          camIndex = (camIndex + 1) % videoDevices.length;
+          const label = videoDevices[camIndex].label || `Camera #${camIndex + 1}`;
+          logToScreen(`Chuyển sang: ${label}`);
+          await releaseCameraHardware();
+
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { deviceId: { exact: videoDevices[camIndex].deviceId } }
+            });
+            currentStream = stream;
+            video.srcObject = stream;
+            await video.play();
+            document.getElementById('cam-index-lbl').innerText = `${camIndex + 1}/${videoDevices.length}`;
+            logToScreen(`Đổi sang ${label} thành công!`, "success");
+            rafId = requestAnimationFrame(processFrame);
+            break;
+          } catch (switchErr) {
+            logToScreen(`Bỏ qua ống kính phụ (${switchErr.name})...`, "warn");
+          }
+        }
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+        isSwitchingCam = false;
       }
-      camIndex = (camIndex + 1) % videoDevices.length;
-      await startSelectedStream(false);
     }
 
     function processFrame() {
@@ -243,13 +320,11 @@
       }
 
       if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0 && detector) {
-        // Đồng bộ kích thước canvas vẽ viền với khung gốc của video
         if (overlayCanvas.width !== video.videoWidth || overlayCanvas.height !== video.videoHeight) {
           overlayCanvas.width = video.videoWidth;
           overlayCanvas.height = video.videoHeight;
         }
 
-        // CHUẨN HÓA ẢNH VỀ CHIỀU NGANG 640PX: Giúp kernel adaptiveThreshold bắt nét cực nhạy, không bị rỗng ruột viền đen
         const targetW = 640;
         const scale = video.videoWidth / targetW;
         const targetH = Math.round(video.videoHeight / scale);
@@ -268,17 +343,13 @@
         const markers = detector.detect(imageData);
         const cvTime = Math.round(performance.now() - t0);
 
-        // Số lượng hình tứ giác đen mà AI nhìn thấy (trước khi giải mã bit)
         const candCount = detector.candidates ? detector.candidates.length : 0;
         document.getElementById('metric-cand').innerText = `${candCount} khung vuông`;
         document.getElementById('metric-fps').innerHTML = `${currentFps} FPS / ${cvTime}ms`;
 
-        // Vẽ chính xác ảnh nhị phân từ lõi detector.thres lên PiP để chẩn đoán
         renderRealThreshold(detector.thres, targetW, targetH);
-
         overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-        // Vẽ viền vàng đứt nét cho các ứng viên ô vuông (giúp biết AI có thấy khung vuông hay không)
         if (detector.candidates) {
           overlayCtx.strokeStyle = "rgba(250, 204, 21, 0.45)";
           overlayCtx.lineWidth = 2;
@@ -291,7 +362,6 @@
           });
         }
 
-        // Vẽ viền xanh lá đậm + Đáp án A/B/C/D khi giải mã thành công
         if (markers.length > 0) {
           const summary = markers.map(m => `#${m.id}`).join(', ');
           document.getElementById('marker-status').innerText = `ĐÃ NHẬN: ${summary}`;
@@ -315,7 +385,6 @@
             overlayCtx.closePath();
             overlayCtx.stroke();
 
-            // Chấm đỏ đánh dấu đỉnh gốc (Góc 0)
             overlayCtx.fillStyle = "#ef4444";
             overlayCtx.beginPath();
             overlayCtx.arc(c[0].x, c[0].y, 8, 0, Math.PI * 2);
